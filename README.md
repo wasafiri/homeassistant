@@ -1,6 +1,6 @@
 Esphome yaml files for home-assistant. 
 
-Using nws to grab temp highs and lows, and openWeatherMap for preciptation history and predictions (api free up to 2000 req/day, which we will never approach, as we update sensors once per hour.) 
+Using nws to grab temp highs and lows, and openWeatherMap for preciptation history and predictions (api free up to 1000 req/day, which we will never approach, as we update sensors once per hour.) 
 
 devices so far: 
 - LOLIN TFT-2.4 running on a D1 mini ESP32
