@@ -170,32 +170,32 @@ globals:
   - id: timer1_name_text
     type: std::string
     restore_value: yes
-    initial_value: '"liberty haze"'
+    initial_value: '"timer1"'
 
   - id: timer2_name_text
     type: std::string
     restore_value: yes
-    initial_value: '"mel runtz"'
+    initial_value: '"timer2"'
 
   - id: timer3_name_text
     type: std::string
     restore_value: yes
-    initial_value: '"tomatoes"'
+    initial_value: '"timer3"'
 
   - id: timer4_name_text
     type: std::string
     restore_value: yes
-    initial_value: '"peppers"'
+    initial_value: '"timer4"'
 
   - id: timer5_name_text
     type: std::string
     restore_value: yes
-    initial_value: '"grafts"'
+    initial_value: '"timer5"'
 
   - id: timer6_name_text
     type: std::string
     restore_value: yes
-    initial_value: '"unassigned"'
+    initial_value: '"timer6"'
 
   - id: last_touch_time
     type: uint32_t
@@ -548,7 +548,7 @@ switch:
 
 number:
   - platform: template
-    name: "liberty haze days"
+    name: "timer1 days"
     id: timer1_days
     optimistic: yes
     min_value: 0
@@ -564,7 +564,7 @@ number:
             args: [x]
 
   - platform: template
-    name: "mel runtz days"
+    name: "timer2 days"
     id: timer2_days
     optimistic: yes
     min_value: 0
@@ -580,7 +580,7 @@ number:
             args: [x]
 
   - platform: template
-    name: "tomatoes days"
+    name: "timer3 days"
     id: timer3_days
     optimistic: yes
     min_value: 0
@@ -596,7 +596,7 @@ number:
             args: [x]
 
   - platform: template
-    name: "peppers days"
+    name: "timer4 days"
     id: timer4_days
     optimistic: yes
     min_value: 0
@@ -612,7 +612,7 @@ number:
             args: [x]
 
   - platform: template
-    name: "grafts days"
+    name: "timer5 days"
     id: timer5_days
     optimistic: yes
     min_value: 0
@@ -628,7 +628,7 @@ number:
             args: [x]
 
   - platform: template
-    name: "unassigned days"
+    name: "timer6 days"
     id: timer6_days
     optimistic: yes
     min_value: 0
