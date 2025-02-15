@@ -1,0 +1,643 @@
+esphome:
+  name: cyd-timer
+  friendly_name: CYD Timer
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret ha_api
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "CYD-Timer Fallback Hotspot"
+    password: "86UioG8zRMA3"
+
+captive_portal:
+
+################################################################
+# Hardware Configuration for the CYD (Cheap Yellow Display)
+################################################################
+
+i2c:
+  - sda: 27
+    scl: 22
+    scan: true
+    frequency: 300kHz
+
+spi:
+  # SPI bus for the ILI9341 TFT
+  - id: tft
+    clk_pin: 14
+    mosi_pin: 13
+    miso_pin:
+      number: 12
+      ignore_strapping_warning: true
+
+  # SPI bus for the XPT2046 Touch
+  - id: touch
+    clk_pin: 25
+    mosi_pin: 32
+    miso_pin: 39
+
+output:
+  - id: backlight_pwm
+    platform: ledc
+    pin: 21
+
+  - id: output_red
+    platform: ledc
+    pin: 4
+    inverted: true
+
+  - id: output_green
+    platform: ledc
+    pin: 16
+    inverted: true
+
+  - id: output_blue
+    platform: ledc
+    pin: 17
+    inverted: true
+
+light:
+  - id: backlight
+    platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    restore_mode: ALWAYS_ON
+
+  - id: led
+    platform: rgb
+    red: output_red
+    green: output_green
+    blue: output_blue
+    restore_mode: ALWAYS_OFF
+
+################################################################
+# Timer Active States
+################################################################
+globals:
+  # Timers 1-6 active flags
+  - id: timer1_active
+    type: bool
+    restore_value: yes
+    initial_value: 'true'
+
+  - id: timer2_active
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+
+  - id: timer3_active
+    type: bool
+    restore_value: yes
+    initial_value: 'true'
+
+  - id: timer4_active
+    type: bool
+    restore_value: yes
+    initial_value: 'true'
+
+  - id: timer5_active
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+
+  - id: timer6_active
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+
+
+  # Timer names
+  - id: timer1_name_text
+    type: std::string
+    restore_value: yes
+    initial_value: '"liberty haze"'
+
+  - id: timer2_name_text
+    type: std::string
+    restore_value: yes
+    initial_value: '"mel runtz"'
+
+  - id: timer3_name_text
+    type: std::string
+    restore_value: yes
+    initial_value: '"tomatoes"'
+
+  - id: timer4_name_text
+    type: std::string
+    restore_value: yes
+    initial_value: '"peppers"'
+
+  - id: timer5_name_text
+    type: std::string
+    restore_value: yes
+    initial_value: '"grafts"'
+
+  - id: timer6_name_text
+    type: std::string
+    restore_value: yes
+    initial_value: '"unassigned"'
+
+  - id: last_touch_time
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+  # Tracks which timer just got reset (for the flash color)
+  - id: reset_flash_timer
+    type: int
+    restore_value: no
+    initial_value: '-1'
+
+  # Temp boolean to indicate a reset happened
+  - id: temp_reset_hit
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+################################################################
+# Display Configuration
+################################################################
+display:
+  - platform: ili9xxx
+    model: ILI9341
+    id: main_display
+    spi_id: tft
+    cs_pin:
+      number: 15
+      ignore_strapping_warning: true
+    dc_pin:
+      number: 2
+      ignore_strapping_warning: true
+    invert_colors: false
+    
+    rotation: 0  # Portrait orientation
+
+    lambda: |-
+      // Fill the entire display black for dark mode
+      it.fill(Color::BLACK);
+
+      // 6 timers, arranged in 3 rows × 2 columns.
+      // Each cell ~120px wide, ~106px tall in a 240x320 portrait display.
+      for (int i = 0; i < 6; i++) {
+        int col = i % 2;  // 0 or 1
+        int row = i / 2;  // 0,1,2
+        int x = col * 120;
+        int y = row * 106;
+        
+        bool active = false;
+        int value = 0;
+        std::string name;
+
+        switch (i) {
+          case 0:
+            name   = id(timer1_name_text);
+            value  = id(timer1_days).state;
+            active = id(timer1_active);
+            break;
+          case 1:
+            name   = id(timer2_name_text);
+            value  = id(timer2_days).state;
+            active = id(timer2_active);
+            break;
+          case 2:
+            name   = id(timer3_name_text);
+            value  = id(timer3_days).state;
+            active = id(timer3_active);
+            break;
+          case 3:
+            name   = id(timer4_name_text);
+            value  = id(timer4_days).state;
+            active = id(timer4_active);
+            break;
+          case 4:
+            name   = id(timer5_name_text);
+            value  = id(timer5_days).state;
+            active = id(timer5_active);
+            break;
+          case 5:
+            name   = id(timer6_name_text);
+            value  = id(timer6_days).state;
+            active = id(timer6_active);
+            break;
+        }
+
+        // Outline color depends on whether this timer was just reset or if it's active.
+        Color box_color;
+        if (i == id(reset_flash_timer)) {
+          box_color = Color(0xFFFF00FF); // bright purple flash
+        } else {
+          box_color = active ? id(retro_orange) : id(retro_blue);
+        }
+
+        // Draw rectangular outline with a small margin
+        it.rectangle(x + 5, y + 5, 110, 96, box_color);
+
+        // If active, show a small green circle near top-left
+        if (active) {
+          it.filled_circle(x + 15, y + 15, 5, id(retro_green));
+        }
+
+        // Print the day value (shifted up & left for more space)
+        it.printf(x + 26, y + 19, id(roboto_large), id(retro_white), "%d", value);
+
+        // "DAYS" text, slightly left
+        it.print(x + 36, y + 60, id(roboto_small), id(retro_cyan), "DAYS");
+
+        // Wrap name if longer than 12 chars
+        std::string line1, line2;
+        const size_t wrap_at = 12;
+        if (name.size() <= wrap_at) {
+          line1 = name;
+          line2 = "";
+        } else {
+          line1 = name.substr(0, wrap_at);
+          line2 = name.substr(wrap_at);
+        }
+        
+        // Print name(s) near bottom
+        it.print(x + 10, y + 80, id(roboto_small), id(retro_white), line1.c_str());
+        if (!line2.empty()) {
+          it.print(x + 10, y + 95, id(roboto_small), id(retro_white), line2.c_str());
+        }
+      }
+
+################################################################
+# Touchscreen Configuration
+################################################################
+touchscreen:
+  - id: main_touchscreen
+    platform: xpt2046
+    spi_id: touch
+    cs_pin: 33
+    interrupt_pin: 36
+    threshold: 400
+    calibration:
+      x_min: 280
+      x_max: 3860
+      y_min: 340
+      y_max: 3860
+    transform:
+      mirror_x: true
+    on_touch:
+      then:
+        - lambda: |-
+            // 6 cells, each ~120x106 in portrait mode
+            // Timer index = row*2 + col
+            int cell_col = touch.x / 120;
+            int cell_row = touch.y / 106;
+            int found_timer = cell_row * 2 + cell_col;
+
+            // Ignore if out of range
+            if (found_timer < 0 || found_timer > 5) {
+              return;
+            }
+
+            // Check for double tap
+            uint32_t current_time = millis();
+            bool is_double_tap = (current_time - id(last_touch_time)) < 500;
+            id(last_touch_time) = current_time;
+
+            if (is_double_tap) {
+              // Double tap => RESET the timer
+              ESP_LOGI("touch", "Double tap in cell %d at x=%d, y=%d => RESET", found_timer, touch.x, touch.y);
+              switch(found_timer) {
+                case 0: id(timer1_days).publish_state(0); break;
+                case 1: id(timer2_days).publish_state(0); break;
+                case 2: id(timer3_days).publish_state(0); break;
+                case 3: id(timer4_days).publish_state(0); break;
+                case 4: id(timer5_days).publish_state(0); break;
+                case 5: id(timer6_days).publish_state(0); break;
+              }
+              // Trigger the purple flash after reset
+              id(reset_flash_timer) = found_timer;
+              id(temp_reset_hit) = true;
+
+            } else {
+              // Single tap => TOGGLE active state (pause/unpause)
+              ESP_LOGI("touch", "Single tap in cell %d at x=%d, y=%d => TOGGLE", found_timer, touch.x, touch.y);
+              switch(found_timer) {
+                case 0:
+                  id(timer1_active) = !id(timer1_active);
+                  id(timer1_active_switch).publish_state(id(timer1_active));
+                  break;
+                case 1:
+                  id(timer2_active) = !id(timer2_active);
+                  id(timer2_active_switch).publish_state(id(timer2_active));
+                  break;
+                case 2:
+                  id(timer3_active) = !id(timer3_active);
+                  id(timer3_active_switch).publish_state(id(timer3_active));
+                  break;
+                case 3:
+                  id(timer4_active) = !id(timer4_active);
+                  id(timer4_active_switch).publish_state(id(timer4_active));
+                  break;
+                case 4:
+                  id(timer5_active) = !id(timer5_active);
+                  id(timer5_active_switch).publish_state(id(timer5_active));
+                  break;
+                case 5:
+                  id(timer6_active) = !id(timer6_active);
+                  id(timer6_active_switch).publish_state(id(timer6_active));
+                  break;
+              }
+            }
+
+        # If we just reset, flash in purple, then revert
+        - if:
+            condition:
+              lambda: 'return id(temp_reset_hit);'
+            then:
+              - lambda: |-
+                  id(main_display).update();
+              - delay: 300ms
+              - lambda: |-
+                  id(reset_flash_timer) = -1;
+                  id(main_display).update();
+              - lambda: |-
+                  id(temp_reset_hit) = false;
+
+################################################################
+# Colors and Fonts
+################################################################
+color:
+  - id: retro_red
+    hex: FF1744
+  - id: retro_orange
+    hex: FF9100
+  - id: retro_yellow
+    hex: FFD600
+  - id: retro_green
+    hex: 00E676
+  - id: retro_blue
+    hex: 00B0FF
+  - id: retro_cyan
+    hex: 00FFFF
+  - id: retro_teal
+    hex: 00BFA5
+  - id: retro_white
+    hex: FFFFFF
+
+font:
+  - file: "Roboto-Regular.ttf"
+    id: roboto_small
+    size: 14
+  - file: "Roboto-Regular.ttf"
+    id: roboto_medium
+    size: 30
+  - file: "Roboto-Regular.ttf"
+    id: roboto_large
+    size: 36
+
+################################################################
+# Timer State Management
+################################################################
+text_sensor:
+  - platform: template
+    name: "Timer 1 Name"
+    id: timer1_name
+    lambda: |-
+      return id(timer1_name_text);
+
+  - platform: template
+    name: "Timer 2 Name"
+    id: timer2_name
+    lambda: |-
+      return id(timer2_name_text);
+
+  - platform: template
+    name: "Timer 3 Name"
+    id: timer3_name
+    lambda: |-
+      return id(timer3_name_text);
+
+  - platform: template
+    name: "Timer 4 Name"
+    id: timer4_name
+    lambda: |-
+      return id(timer4_name_text);
+
+  - platform: template
+    name: "Timer 5 Name"
+    id: timer5_name
+    lambda: |-
+      return id(timer5_name_text);
+
+  - platform: template
+    name: "Timer 6 Name"
+    id: timer6_name
+    lambda: |-
+      return id(timer6_name_text);
+
+switch:
+  - platform: template
+    name: "Timer 1 Active"
+    id: timer1_active_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: 'id(timer1_active) = true;'
+    turn_off_action:
+      - lambda: 'id(timer1_active) = false;'
+
+  - platform: template
+    name: "Timer 2 Active"
+    id: timer2_active_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: 'id(timer2_active) = true;'
+    turn_off_action:
+      - lambda: 'id(timer2_active) = false;'
+
+  - platform: template
+    name: "Timer 3 Active"
+    id: timer3_active_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: 'id(timer3_active) = true;'
+    turn_off_action:
+      - lambda: 'id(timer3_active) = false;'
+
+  - platform: template
+    name: "Timer 4 Active"
+    id: timer4_active_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: 'id(timer4_active) = true;'
+    turn_off_action:
+      - lambda: 'id(timer4_active) = false;'
+
+  - platform: template
+    name: "Timer 5 Active"
+    id: timer5_active_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: 'id(timer5_active) = true;'
+    turn_off_action:
+      - lambda: 'id(timer5_active) = false;'
+
+  - platform: template
+    name: "Timer 6 Active"
+    id: timer6_active_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: 'id(timer6_active) = true;'
+    turn_off_action:
+      - lambda: 'id(timer6_active) = false;'
+
+number:
+  - platform: template
+    name: "liberty haze Days"
+    id: timer1_days
+    optimistic: yes
+    min_value: 0
+    max_value: 9999
+    step: 1
+    restore_value: yes
+    initial_value: 50
+    icon: "mdi:timer"
+    on_value:
+      then:
+        - logger.log:
+            format: "Timer 1 value changed to %d"
+            args: [x]
+
+  - platform: template
+    name: "mel runtz Days"
+    id: timer2_days
+    optimistic: yes
+    min_value: 0
+    max_value: 9999
+    step: 1
+    restore_value: yes
+    initial_value: 0
+    icon: "mdi:timer"
+    on_value:
+      then:
+        - logger.log:
+            format: "Timer 2 value changed to %d"
+            args: [x]
+
+  - platform: template
+    name: "tomatoes Days"
+    id: timer3_days
+    optimistic: yes
+    min_value: 0
+    max_value: 9999
+    step: 1
+    restore_value: yes
+    initial_value: 15
+    icon: "mdi:timer"
+    on_value:
+      then:
+        - logger.log:
+            format: "Timer 3 value changed to %d"
+            args: [x]
+
+  - platform: template
+    name: "peppers Days"
+    id: timer4_days
+    optimistic: yes
+    min_value: 0
+    max_value: 9999
+    step: 1
+    restore_value: yes
+    initial_value: 6
+    icon: "mdi:timer"
+    on_value:
+      then:
+        - logger.log:
+            format: "Timer 4 value changed to %d"
+            args: [x]
+
+  - platform: template
+    name: "zucchini Days"
+    id: timer5_days
+    optimistic: yes
+    min_value: 0
+    max_value: 9999
+    step: 1
+    restore_value: yes
+    initial_value: 0
+    icon: "mdi:timer"
+    on_value:
+      then:
+        - logger.log:
+            format: "Timer 5 value changed to %d"
+            args: [x]
+
+  - platform: template
+    name: "eggplant Days"
+    id: timer6_days
+    optimistic: yes
+    min_value: 0
+    max_value: 9999
+    step: 1
+    restore_value: yes
+    initial_value: 0
+    icon: "mdi:timer"
+    on_value:
+      then:
+        - logger.log:
+            format: "Timer 6 value changed to %d"
+            args: [x]
+
+################################################################
+# Time Configuration for Daily Updates
+################################################################
+time:
+  - platform: sntp
+    id: time_sntp
+    timezone: America/Los_Angeles
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        then:
+          lambda: |-
+            // Only increment active timers
+            if (id(timer1_active)) {
+              id(timer1_days).publish_state(id(timer1_days).state + 1);
+              ESP_LOGI("timer", "Timer 1 incremented to %d days", id(timer1_days).state + 1);
+            }
+            if (id(timer2_active)) {
+              id(timer2_days).publish_state(id(timer2_days).state + 1);
+              ESP_LOGI("timer", "Timer 2 incremented to %d days", id(timer2_days).state + 1);
+            }
+            if (id(timer3_active)) {
+              id(timer3_days).publish_state(id(timer3_days).state + 1);
+              ESP_LOGI("timer", "Timer 3 incremented to %d days", id(timer3_days).state + 1);
+            }
+            if (id(timer4_active)) {
+              id(timer4_days).publish_state(id(timer4_days).state + 1);
+              ESP_LOGI("timer", "Timer 4 incremented to %d days", id(timer4_days).state + 1);
+            }
+            if (id(timer5_active)) {
+              id(timer5_days).publish_state(id(timer5_days).state + 1);
+              ESP_LOGI("timer", "Timer 5 incremented to %d days", id(timer5_days).state + 1);
+            }
+            if (id(timer6_active)) {
+              id(timer6_days).publish_state(id(timer6_days).state + 1);
+              ESP_LOGI("timer", "Timer 6 incremented to %d days", id(timer6_days).state + 1);
+            }
+
+################################################################
+# Display Updates
+################################################################
+interval:
+  - interval: 2s
+    then:
+      - component.update: main_display
