@@ -68,14 +68,15 @@ color:
 font:
   - file: "Roboto-Regular.ttf"
     id: roboto_small
-    size: 24
+    size: 17
   - file: "Roboto-Regular.ttf"
     id: roboto_medium
-    size: 30
+    size: 32
   - file: "Roboto-Regular.ttf"
     id: roboto_large
     size: 36
 
+# Display: 6 boxes arranged as 2 rows of 3
 display:
   - platform: ili9xxx
     model: ILI9341
@@ -85,115 +86,146 @@ display:
     rotation: 90
     id: tft_display
     invert_colors: false
-    pages:
-      # Page 1: Today's Weather
-      - id: weather_today
-        lambda: !lambda |-
-          it.fill(Color::BLACK);
-          it.print(10, 20, id(roboto_large), id(retro_blue), "WEATHER");
-          it.print(10, 60, id(roboto_medium), id(retro_yellow), "TODAY");
-          it.printf(10, 100, id(roboto_medium), id(retro_red), "High: %.1f°F", id(today_high).state);
-          it.printf(10, 140, id(roboto_medium), id(retro_blue), "Low: %.1f°F", id(tonight_low).state);
+    lambda: |-
+      // Helper: Draw a rectangle border by plotting individual pixels.
+      auto draw_rect = [&] (int x, int y, int w, int h, Color c) {
+        // Top and bottom horizontal lines.
+        for (int i = 0; i < w; i++) {
+          it.draw_pixel_at(x + i, y, c);
+          it.draw_pixel_at(x + i, y + h - 1, c);
+        }
+        // Left and right vertical lines.
+        for (int j = 0; j < h; j++) {
+          it.draw_pixel_at(x, y + j, c);
+          it.draw_pixel_at(x + w - 1, y + j, c);
+        }
+      };
 
-      # Page 2: Tomorrow's Weather
-      - id: weather_tomorrow
-        lambda: !lambda |-
-          it.fill(Color::BLACK);
-          it.print(10, 20, id(roboto_large), id(retro_blue), "WEATHER");
-          it.print(10, 60, id(roboto_medium), id(retro_yellow), "TOMORROW");
-          it.printf(10, 100, id(roboto_medium), id(retro_red), "High: %.1f°F", id(tomorrow_high).state);
-          it.printf(10, 140, id(roboto_medium), id(retro_blue), "Low: %.1f°F", id(tomorrow_low).state);
+      // Grid dimensions for a 320x240 display:
+      const int square_w1 = 106;
+      const int square_w2 = 106;
+      const int square_w3 = 108;  // 106 + 106 + 108 = 320
+      const int square_h  = 120;   // 120 + 120 = 240
+      const int margin    = 5;
 
-      # Page 3: Today's Rain (NEW)
-      - id: today_rain
-        lambda: !lambda |-
-          it.fill(Color::BLACK);
-          it.print(10, 20, id(roboto_large), id(retro_blue), "TODAY'S RAIN");
+      // Draw borders for each square.
+      // Top row:
+      draw_rect(0, 0, square_w1, square_h, id(retro_blue));
+      draw_rect(square_w1, 0, square_w2, square_h, id(retro_blue));
+      draw_rect(square_w1 * 2, 0, square_w3, square_h, id(retro_blue));
+      // Bottom row:
+      draw_rect(0, square_h, square_w1, square_h, id(retro_blue));
+      draw_rect(square_w1, square_h, square_w2, square_h, id(retro_blue));
+      draw_rect(square_w1 * 2, square_h, square_w3, square_h, id(retro_blue));
 
-          float rain_now = id(rain_today).has_state() ? id(rain_today).state : -1;
-          float rain_expected = id(rain_forecast).has_state() ? id(rain_forecast).state : -1;
+      // --- TOP ROW ---
+      // Square 1: TODAY
+      int base_x = margin;
+      int base_y = margin;
+      it.print(base_x, base_y, id(roboto_small), id(retro_blue), "TODAY");
+      it.printf(base_x, base_y + 20, id(roboto_medium), id(retro_red), "%.0f°", id(today_high).state);
+      it.printf(base_x, base_y + 45, id(roboto_medium), id(retro_blue), "%.0f°", id(tonight_low).state);
+      it.printf(base_x, base_y + 83, id(roboto_small), id(retro_yellow), "%.2f/%.2f\"",
+                id(rain_today).state, id(rain_forecast).state);
 
-          if (rain_now >= 0) {
-            it.printf(10, 60, id(roboto_medium), id(retro_yellow), "So Far: %.2f in", rain_now);
-          } else {
-            it.print(10, 60, id(roboto_medium), id(retro_yellow), "So Far: No Data");
-          }
+      // Square 2: TMW
+      base_x = square_w1 + margin;
+      base_y = margin;
+      it.print(base_x, base_y, id(roboto_small), id(retro_blue), "TMW");
+      it.printf(base_x, base_y + 20, id(roboto_medium), id(retro_red), "%.0f°", id(tomorrow_high).state);
+      it.printf(base_x, base_y + 45, id(roboto_medium), id(retro_blue), "%.0f°", id(tomorrow_low).state);
+      it.printf(base_x, base_y + 83, id(roboto_small), id(retro_yellow), "%.2f\"", id(future_rain_1).state);
 
-          if (rain_expected >= 0) {
-            it.printf(10, 100, id(roboto_medium), id(retro_yellow), "Expected: %.2f in", rain_expected);
-          } else {
-            it.print(10, 100, id(roboto_medium), id(retro_yellow), "Expected: No Data");
-          }
+      // Square 3: Forecast Day (2 days from now)
+      base_x = square_w1 * 2 + margin;
+      base_y = margin;
+      {
+        time_t future_time = id(esptime).now().timestamp + 2 * 86400;
+        struct tm *timeinfo = localtime(&future_time);
+        char day_buffer[8];
+        strftime(day_buffer, sizeof(day_buffer), "%a", timeinfo);
+        it.print(base_x, base_y, id(roboto_small), id(retro_blue), day_buffer);
+      }
+      it.printf(base_x, base_y + 20, id(roboto_medium), id(retro_red), "%.0f°", id(forecast2max).state);
+      it.printf(base_x, base_y + 45, id(roboto_medium), id(retro_blue), "%.0f°", id(forecast2min).state);
+      it.printf(base_x, base_y + 83, id(roboto_small), id(retro_yellow), "%.2f\"", id(forecast2rain).state);
 
-      # Page 4: Recent Rain
-      - id: recent_rain
-        lambda: !lambda |-
-          it.fill(Color::BLACK);
-          it.print(10, 20, id(roboto_large), id(retro_blue), "RECENT RAIN");
+      // --- BOTTOM ROW ---
+      // Square 4: LAST 4 (Past 4 Days Values)
+      base_x = margin;
+      base_y = square_h + margin;
+      it.print(base_x, base_y, id(roboto_small), id(retro_blue), "LAST 4 DAY");
+      int bot_line_y = base_y + 20;
+      // Line 1 (Yesterday)
+      it.printf(base_x, bot_line_y, id(roboto_small), id(retro_yellow), "%.2f\"", id(rain_yesterday).state);
+      it.print(base_x + 40, bot_line_y, id(roboto_small), id(retro_blue), "/");
+      it.printf(base_x + 45, bot_line_y, id(roboto_small), Color::WHITE, "%.2f\"", id(yesterday_snow).state);
+      // Line 2 (2 Days Ago)
+      bot_line_y += 20;
+      it.printf(base_x, bot_line_y, id(roboto_small), id(retro_yellow), "%.2f\"", id(rain_2_days_ago).state);
+      it.print(base_x + 40, bot_line_y, id(roboto_small), id(retro_blue), "/");
+      it.printf(base_x + 45, bot_line_y, id(roboto_small), Color::WHITE, "%.2f\"", id(two_days_ago_snow).state);
+      // Line 3 (3 Days Ago)
+      bot_line_y += 20;
+      it.printf(base_x, bot_line_y, id(roboto_small), id(retro_yellow), "%.2f\"", id(rain_3_days_ago).state);
+      it.print(base_x + 40, bot_line_y, id(roboto_small), id(retro_blue), "/");
+      it.printf(base_x + 45, bot_line_y, id(roboto_small), Color::WHITE, "%.2f\"", id(three_days_ago_snow).state);
+      // Line 4 (4 Days Ago)
+      bot_line_y += 20;
+      it.printf(base_x, bot_line_y, id(roboto_small), id(retro_yellow), "%.2f\"", id(day4_rain).state);
+      it.print(base_x + 40, bot_line_y, id(roboto_small), id(retro_blue), "/");
+      it.printf(base_x + 45, bot_line_y, id(roboto_small), Color::WHITE, "%.2f\"", id(day4_snow).state);
 
-          float rain1 = id(rain_yesterday).has_state() ? id(rain_yesterday).state : 0.00;
-          float rain2 = id(rain_2_days_ago).has_state() ? id(rain_2_days_ago).state : 0.00;
-          float rain3 = id(rain_3_days_ago).has_state() ? id(rain_3_days_ago).state : 0.00;
-          float total_rain = rain1 + rain2 + rain3;
+      // Square 5: 4 DAY Totals
+      base_x = square_w1 + margin;
+      base_y = square_h + margin;
+      float total_rain = id(rain_today).state + id(rain_yesterday).state + id(rain_2_days_ago).state +
+                         id(rain_3_days_ago).state + id(day4_rain).state;
+      float total_snow = id(day0_snow).state + id(yesterday_snow).state + id(two_days_ago_snow).state +
+                         id(three_days_ago_snow).state + id(day4_snow).state;
+      it.print(base_x, base_y, id(roboto_small), id(retro_blue), "SUM LAST 4");
+      base_y += 20;
+      it.printf(base_x, base_y, id(roboto_small), id(retro_yellow), "Rain %.2f\"", total_rain);
+      base_y += 20;
+      it.printf(base_x, base_y, id(roboto_small), Color::WHITE, "Snow %.2f\"", total_snow);
 
-          it.printf(10, 60, id(roboto_medium), id(retro_yellow), "Yesterday: %.2f in", rain1);
-          it.printf(10, 100, id(roboto_medium), id(retro_yellow), "2 Days Ago: %.2f in", rain2);
-          it.printf(10, 140, id(roboto_medium), id(retro_yellow), "3 Days Ago: %.2f in", rain3);
-          it.printf(10, 180, id(roboto_medium), id(retro_red), "Total: %.2f in", total_rain);
+      // Square 6: CHANCE (Chance of rain in next hour)
+      base_x = square_w1 * 2 + margin;
+      base_y = square_h + margin;
+      it.print(base_x, base_y, id(roboto_small), id(retro_blue), "RAIN NOW");
 
-      # Page 5: Future Rain
-      - id: future_rain
-        lambda: !lambda |-
-          it.fill(Color::BLACK);
-          it.print(10, 20, id(roboto_large), id(retro_blue), "FUTURE RAIN");
+      // Format the chance sensor value into a string.
+      char chance_buffer[16];
+      sprintf(chance_buffer, "%.0f%%", id(chance_rain_1hr).state * 100);
 
-          float rain_tomorrow = id(future_rain_1).has_state() ? id(future_rain_1).state : -1;
-          float rain_day_after = id(future_rain_2).has_state() ? id(future_rain_2).state : -1;
+      // Approximate text width based on character count (adjust multiplier as needed)
+      int text_width = strlen(chance_buffer) * 20;  // e.g., 20 pixels per character
+      int center_x = base_x + (square_w3 - text_width) / 2;
 
-          if (rain_tomorrow >= 0) {
-            it.printf(10, 60, id(roboto_medium), id(retro_yellow), "Tomorrow: %.2f in", rain_tomorrow);
-          } else {
-            it.print(10, 60, id(roboto_medium), id(retro_yellow), "Tomorrow: No Data");
-          }
+      it.print(center_x, base_y + 30, id(roboto_large), id(retro_yellow), chance_buffer);
 
-          if (rain_day_after >= 0) {
-            it.printf(10, 100, id(roboto_medium), id(retro_yellow), "Day After: %.2f in", rain_day_after);
-          } else {
-            it.print(10, 100, id(roboto_medium), id(retro_yellow), "Day After: No Data");
-          }
-
-light:
-  - platform: monochromatic
-    output: tft_backlight
-    name: "TFT Backlight"
-    id: backlight
-
-output:
-  - platform: ledc
-    pin: 21
-    id: tft_backlight
-
+# Sensors from Home Assistant
 sensor:
   - platform: homeassistant
     id: today_high
-    entity_id: sensor.today_s_high_temperature
+    entity_id: sensor.owmh_home_forecast0max
 
   - platform: homeassistant
     id: tonight_low
-    entity_id: sensor.tonight_s_low_temperature
+    entity_id: sensor.owmh_home_forecast0min
 
   - platform: homeassistant
     id: tomorrow_high
-    entity_id: sensor.tomorrow_s_high_temperature
+    entity_id: sensor.owmh_home_forecast1max
 
   - platform: homeassistant
     id: tomorrow_low
-    entity_id: sensor.tomorrow_s_low_temperature
-  
+    entity_id: sensor.owmh_home_forecast1min
+
   - platform: homeassistant
     id: rain_today
     entity_id: sensor.owmh_home_day0rain
-  
+
   - platform: homeassistant
     id: rain_forecast
     entity_id: sensor.owmh_home_forecast0rain
@@ -211,14 +243,65 @@ sensor:
     entity_id: sensor.owmh_home_day3rain
 
   - platform: homeassistant
+    id: day4_rain
+    entity_id: sensor.owmh_home_day4rain
+
+  - platform: homeassistant
     id: future_rain_1
     entity_id: sensor.owmh_home_forecast1rain
 
   - platform: homeassistant
-    id: future_rain_2
+    id: forecast2max
+    entity_id: sensor.owmh_home_forecast2max
+
+  - platform: homeassistant
+    id: forecast2min
+    entity_id: sensor.owmh_home_forecast2min
+
+  - platform: homeassistant
+    id: forecast2rain
     entity_id: sensor.owmh_home_forecast2rain
 
-interval:
-  - interval: 5s
-    then:
-      - display.page.show_next: tft_display
+  # For the LAST 4 box (rain/snow for previous days)
+  - platform: homeassistant
+    id: yesterday_snow
+    entity_id: sensor.owmh_home_day1snow
+
+  - platform: homeassistant
+    id: two_days_ago_snow
+    entity_id: sensor.owmh_home_day2snow
+
+  - platform: homeassistant
+    id: three_days_ago_snow
+    entity_id: sensor.owmh_home_day3snow
+
+  # New sensors for 5-day snow totals:
+  - platform: homeassistant
+    id: day0_snow
+    entity_id: sensor.owmh_home_day0snow
+
+  - platform: homeassistant
+    id: day4_snow
+    entity_id: sensor.owmh_home_day4snow
+
+  # For the CHANCE box – chance of rain in the next hour
+  - platform: homeassistant
+    id: chance_rain_1hr
+    entity_id: sensor.owmh_home_forecast0pop
+
+# Text sensor for forecast day name
+text_sensor:
+  - platform: homeassistant
+    id: forecast_day_name
+    entity_id: sensor.forecast_day_name
+
+light:
+  - platform: monochromatic
+    output: tft_backlight
+    name: "TFT Backlight"
+    id: backlight
+
+output:
+  - platform: ledc
+    pin: 21
+    id: tft_backlight
