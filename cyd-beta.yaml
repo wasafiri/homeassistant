@@ -21,14 +21,13 @@ wifi:
 
   ap:
     ssid: "Cyd-Beta Fallback Hotspot"
-    password: !secret fallback_hotspot
+    password: "86UioG8zRMA3"
 
 captive_portal:
 
 ################################################################
 # Hardware Configuration for the CYD (Cheap Yellow Display)
 ################################################################
-
 i2c:
   - sda: 27
     scl: 22
@@ -39,7 +38,7 @@ spi:
   - id: tft
     clk_pin: 14
     mosi_pin: 13
-    miso_pin:
+    miso_pin: 
       number: 12
       ignore_strapping_warning: true
 
@@ -102,12 +101,12 @@ touchscreen:
       mirror_x: true
 
 ################################################################
-# Display Configuration
+# Display Configuration (5 sensors in a 2×3 grid)
 ################################################################
 display:
-  - id: main_display
-    platform: ili9xxx
+  - platform: ili9xxx
     model: ILI9341
+    id: main_display
     spi_id: tft
     cs_pin:
       number: 15
@@ -116,275 +115,96 @@ display:
       number: 2
       ignore_strapping_warning: true
     invert_colors: false
-    auto_clear_enabled: false
     rotation: 90
-    pages:
-      - id: critical_moisture
-        lambda: |-
-          // A helper struct and some inline helper lambdas
-          struct StatusInfo {
-            const char* text;
-            Color color;
-            bool needs_blink;
-          };
+    auto_clear_enabled: false
 
-          auto safe_clear = [](display::Display& it) {
-            it.fill(Color::BLACK);
-          };
+    lambda: |-
+      it.fill(Color::BLACK);
 
-          auto should_blink = []() -> bool {
-            return ((millis() / 150) % 2) == 0;
-          };
+      // We'll do 2 rows × 3 columns = 6 cells, each cell is 105 px wide x 115 px tall.
+      // We'll place a 5 px margin around all edges so we don't clip anything.
+      int colWidth = 105;
+      int rowHeight = 115;
 
-          auto safe_value = [](float value) -> float {
-            if (value < 0.0f) return 0.0f;
-            if (value > 100.0f) return 100.0f;
-            return value;
-          };
+      struct StatusInfo {
+        const char* text;
+        Color color;
+        bool needs_blink;
+      };
 
-          auto truncate_text = [](const char* text, size_t max_len) -> std::string {
-            std::string str(text);
-            if (str.length() > max_len)
-              return str.substr(0, max_len - 3) + "...";
-            return str;
-          };
+      auto should_blink = [&]() -> bool {
+        // Blink every 150 ms
+        return ((millis() / 150) % 2) == 0;
+      };
 
-          auto get_status = [&](float value) -> StatusInfo {
-            if (value >= 61) return {"DROWNING!", id(retro_red), true};
-            if (value <= 9)  return {"DYING!",    id(retro_red), true};
-            if (value <= 19) return {"DRY!",      id(retro_orange), true};
-            if (value <= 25) return {"WATER SOON",id(retro_yellow), true};
-            return {"GOOD!", id(retro_green), false};
-          };
+      auto safe_value = [&](float v) -> float {
+        if (!std::isfinite(v)) return 0.0f;
+        if (v < 0.0f)   return 0.0f;
+        if (v > 100.0f) return 100.0f;
+        return v;
+      };
 
-          safe_clear(it);
-          it.print(10, 20, id(roboto_large), id(retro_red), "CRITICAL STATUS");
+      auto get_status = [&](float v) -> StatusInfo {
+        if (v >= 58.0f)   return {"DROWNING!", id(retro_red), true};
+        if (v <= 12.0f)    return {"DYING!",    id(retro_red), true};
+        if (v <= 18.0f)   return {"DRY!",      id(retro_orange), true};
+        if (v <= 23.0f)   return {"WATER SOON",id(retro_yellow), true};
+        return {"GOOD!", id(retro_green), false};
+      };
 
-          int y_pos = 80;
-          bool has_critical = false;
+      struct Plant {
+        const char* name;
+        optional<float> value;
+        Color name_color;
+      };
 
-          // A local function for each sensor
-          auto check_critical = [&](const char *plant, optional<float> mo_val, Color plant_color) {
-            if (!mo_val.has_value()) {
-              ESP_LOGW("moisture", "No value for sensor %s", plant);
-              return;
-            }
-            float value = safe_value(mo_val.value());
-            if (value <= 19 || value >= 61) {
-              std::string name = truncate_text(plant, 15);
-              StatusInfo stat = get_status(value);
+      // 5 sensors:
+      Plant plants[5] = {
+        { "Little Cado",     id(soil_moisture_1).state, id(retro_blue) },
+        { "Cactus",        id(soil_moisture_2).state, id(retro_orange) },
+        { "Hibiscus",        id(soil_moisture_3).state, id(retro_yellow) },
+        { "Succulent Tbl",   id(soil_moisture_4).state, id(retro_teal) },
+        { "Spider Plant",    id(soil_moisture_5).state, id(retro_cyan) }
+      };
 
-              // Overwrite region (to prevent old text from interfering)
-              it.filled_rectangle(10, y_pos, 220, 60, Color::BLACK);
+      for (int i = 0; i < 6; i++) {
+        if (i >= 5) break; // Only 5 sensors
 
-              if (should_blink()) {
-                it.printf(10, y_pos, id(roboto_small), plant_color, "%s: %.1f%%", name.c_str(), value);
-                it.print(10, y_pos + 30, id(roboto_small), stat.color, stat.text);
-              }
-              y_pos += 70;
-              has_critical = true;
-            }
-          };
+        int col = i % 3;
+        int row = i / 3;
 
-          // Check each plant/sensor
-          check_critical("Little Cado", id(soil_moisture_1).state, id(retro_blue));
-          check_critical("Cannabis", id(soil_moisture_2).state, id(retro_orange));
-          check_critical("Hibiscus", id(soil_moisture_3).state, id(retro_yellow));
-          check_critical("Succulent Table", id(soil_moisture_4).state, id(retro_teal));
-          check_critical("Spider Plant", id(soil_moisture_5).state, id(retro_cyan));
+        // Each cell's top-left corner
+        int x = 5 + col * colWidth;
+        int y = 5 + row * rowHeight;
 
-          if (!has_critical) {
-            it.print(10, y_pos, id(roboto_medium), id(retro_green), "All Plants OK!");
-          }
+        auto &pl = plants[i];
+        if (!pl.value.has_value()) {
+          // No data yet
+          continue;
+        }
 
-      - id: moisture_page1
-        lambda: |-
-          struct StatusInfo {
-            const char* text;
-            Color color;
-            bool needs_blink;
-          };
+        float val = safe_value(pl.value.value());
+        StatusInfo st = get_status(val);
 
-          auto safe_clear = [](display::Display& it) {
-            it.fill(Color::BLACK);
-          };
+        // If critical, blink
+        bool show_text = !st.needs_blink || should_blink();
+        // Outline color
+        Color box_color = st.color;
 
-          auto should_blink = []() -> bool {
-            return ((millis() / 150) % 2) == 0;
-          };
+        // We'll draw a 100×110 rectangle inside the 105×115 cell, offset by 3 px
+        it.rectangle(x + 3, y + 3, 100, 110, box_color);
 
-          auto safe_value = [](float value) -> float {
-            if (value < 0.0f) return 0.0f;
-            if (value > 100.0f) return 100.0f;
-            return value;
-          };
+        if (show_text) {
+          // Plant name near the top
+          it.print(x + 8, y + 8, id(roboto_small), pl.name_color, pl.name);
 
-          auto truncate_text = [](const char* text, size_t max_len) -> std::string {
-            std::string str(text);
-            if (str.length() > max_len)
-              return str.substr(0, max_len - 3) + "...";
-            return str;
-          };
+          // Moisture percentage
+          it.printf(x + 10, y + 40, id(roboto_medium), id(retro_red), "%.1f%%", val);
 
-          auto get_status = [&](float value) -> StatusInfo {
-            if (value >= 61) return {"DROWNING!", id(retro_red), true};
-            if (value <= 9)  return {"DYING!",    id(retro_red), true};
-            if (value <= 19) return {"DRY!",      id(retro_orange), true};
-            if (value <= 25) return {"WATER SOON",id(retro_yellow), true};
-            return {"GOOD!", id(retro_green), false};
-          };
-
-          safe_clear(it);
-          it.print(10, 20, id(roboto_large), id(retro_green), "PLANT MOISTURE 1/3");
-
-          int y_pos = 80;
-
-          auto print_status = [&](const char *plant, optional<float> mo_val, Color plant_color) {
-            if (!mo_val.has_value()) {
-              ESP_LOGW("moisture", "No value for sensor %s", plant);
-              return;
-            }
-            float value = safe_value(mo_val.value());
-            std::string name = truncate_text(plant, 15);
-            StatusInfo stat = get_status(value);
-
-            it.filled_rectangle(10, y_pos, 220, 60, Color::BLACK);
-
-            if (!stat.needs_blink || should_blink()) {
-              it.printf(10, y_pos, id(roboto_small), plant_color, "%s: %.1f%%", name.c_str(), value);
-              it.print(10, y_pos + 30, id(roboto_small), stat.color, stat.text);
-            }
-            y_pos += 70;
-          };
-
-          print_status("Little Cado", id(soil_moisture_1).state, id(retro_blue));
-          print_status("Cannabis", id(soil_moisture_2).state, id(retro_orange));
-
-      - id: moisture_page2
-        lambda: |-
-          struct StatusInfo {
-            const char* text;
-            Color color;
-            bool needs_blink;
-          };
-
-          auto safe_clear = [](display::Display& it) {
-            it.fill(Color::BLACK);
-          };
-
-          auto should_blink = []() -> bool {
-            return ((millis() / 150) % 2) == 0;
-          };
-
-          auto safe_value = [](float value) -> float {
-            if (value < 0.0f) return 0.0f;
-            if (value > 100.0f) return 100.0f;
-            return value;
-          };
-
-          auto truncate_text = [](const char* text, size_t max_len) -> std::string {
-            std::string str(text);
-            if (str.length() > max_len)
-              return str.substr(0, max_len - 3) + "...";
-            return str;
-          };
-
-          auto get_status = [&](float value) -> StatusInfo {
-            if (value >= 61) return {"DROWNING!", id(retro_red), true};
-            if (value <= 9)  return {"DYING!",    id(retro_red), true};
-            if (value <= 19) return {"DRY!",      id(retro_orange), true};
-            if (value <= 25) return {"WATER SOON",id(retro_yellow), true};
-            return {"GOOD!", id(retro_green), false};
-          };
-
-          safe_clear(it);
-          it.print(10, 20, id(roboto_large), id(retro_green), "PLANT MOISTURE 2/3");
-
-          int y_pos = 80;
-
-          auto print_status = [&](const char *plant, optional<float> mo_val, Color plant_color) {
-            if (!mo_val.has_value()) {
-              ESP_LOGW("moisture", "No value for sensor %s", plant);
-              return;
-            }
-            float value = safe_value(mo_val.value());
-            std::string name = truncate_text(plant, 15);
-            StatusInfo stat = get_status(value);
-
-            it.filled_rectangle(10, y_pos, 220, 60, Color::BLACK);
-
-            if (!stat.needs_blink || should_blink()) {
-              it.printf(10, y_pos, id(roboto_small), plant_color, "%s: %.1f%%", name.c_str(), value);
-              it.print(10, y_pos + 30, id(roboto_small), stat.color, stat.text);
-            }
-            y_pos += 70;
-          };
-
-          print_status("Hibiscus", id(soil_moisture_3).state, id(retro_yellow));
-          print_status("Succulent Table", id(soil_moisture_4).state, id(retro_teal));
-
-      - id: moisture_page3
-        lambda: |-
-          struct StatusInfo {
-            const char* text;
-            Color color;
-            bool needs_blink;
-          };
-
-          auto safe_clear = [](display::Display& it) {
-            it.fill(Color::BLACK);
-          };
-
-          auto should_blink = []() -> bool {
-            return ((millis() / 150) % 2) == 0;
-          };
-
-          auto safe_value = [](float value) -> float {
-            if (value < 0.0f) return 0.0f;
-            if (value > 100.0f) return 100.0f;
-            return value;
-          };
-
-          auto truncate_text = [](const char* text, size_t max_len) -> std::string {
-            std::string str(text);
-            if (str.length() > max_len)
-              return str.substr(0, max_len - 3) + "...";
-            return str;
-          };
-
-          auto get_status = [&](float value) -> StatusInfo {
-            if (value >= 61) return {"DROWNING!", id(retro_red), true};
-            if (value <= 9)  return {"DYING!",    id(retro_red), true};
-            if (value <= 19) return {"DRY!",      id(retro_orange), true};
-            if (value <= 25) return {"WATER SOON",id(retro_yellow), true};
-            return {"GOOD!", id(retro_green), false};
-          };
-
-          safe_clear(it);
-          it.print(10, 20, id(roboto_large), id(retro_green), "PLANT MOISTURE 3/3");
-
-          int y_pos = 80;
-
-          auto print_status = [&](const char *plant, optional<float> mo_val, Color plant_color) {
-            if (!mo_val.has_value()) {
-              ESP_LOGW("moisture", "No value for sensor %s", plant);
-              return;
-            }
-            float value = safe_value(mo_val.value());
-            std::string name = truncate_text(plant, 15);
-            StatusInfo stat = get_status(value);
-
-            it.filled_rectangle(10, y_pos, 220, 60, Color::BLACK);
-
-            if (!stat.needs_blink || should_blink()) {
-              it.printf(10, y_pos, id(roboto_small), plant_color, "%s: %.1f%%", name.c_str(), value);
-              it.print(10, y_pos + 30, id(roboto_small), stat.color, stat.text);
-            }
-            y_pos += 70;
-          };
-
-          print_status("Spider Plant", id(soil_moisture_5).state, id(retro_cyan));
-
+          // Status text
+          it.print(x + 10, y + 80, id(roboto_small), st.color, st.text);
+        }
+      }
 
 ################################################################
 # Colors and Fonts
@@ -406,18 +226,21 @@ color:
     hex: 00BFA5
 
 font:
+  # Adjust as you see fit:
   - file: "Roboto-Regular.ttf"
     id: roboto_small
-    size: 24
+    size: 14
+
   - file: "Roboto-Regular.ttf"
     id: roboto_medium
-    size: 36
+    size: 32
+
   - file: "Roboto-Regular.ttf"
     id: roboto_large
-    size: 38
+    size: 36
 
 ################################################################
-# Moisture Sensors
+# Moisture Sensors (from Home Assistant)
 ################################################################
 sensor:
   - platform: homeassistant
@@ -441,15 +264,9 @@ sensor:
     entity_id: sensor.gw1100b_soil_moisture_5
 
 ################################################################
-# Update Intervals
+# Page-Update Intervals
 ################################################################
 interval:
-  # Update the display quickly (for blinking text, etc.)
-  - interval: 500ms
+  - interval: 1000ms
     then:
       - component.update: main_display
-
-  # Cycle through pages every 6 seconds
-  - interval: 6s
-    then:
-      - display.page.show_next: main_display
